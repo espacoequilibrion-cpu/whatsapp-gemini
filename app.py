@@ -1,3 +1,4 @@
+import os
 from flask import Flask, request, jsonify
 from config import VERIFY_TOKEN
 from gemini_service import get_gemini_response
@@ -12,57 +13,55 @@ def home():
 @app.route('/webhook', methods=['GET'])
 def verify_webhook():
     """
-    Rota obrigatória para a Meta verificar o webhook.
+    Rota de validação que a Meta chama ao clicar em 'Verificar e Salvar'.
     """
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
 
+    print(f"[WEBHOOK GET] Recebido - Mode: {mode} | Token: {token} | Challenge: {challenge}")
+
     if mode and token:
         if mode == "subscribe" and token == VERIFY_TOKEN:
-            print("Webhook verificado com sucesso pela Meta!")
-            return challenge, 200
+            print("[WEBHOOK GET] Verificação bem-sucedida!")
+            # A Meta exige que retorne OBRIGATORIAMENTE o challenge como texto puro e status 200
+            return str(challenge), 200
         else:
+            print("[WEBHOOK GET] Token incorreto!")
             return "Token de verificação inválido", 403
             
-    return "Página de verificação do Webhook", 200
+    return "Rota do Webhook - Espaço EquilibriON", 200
 
 @app.route('/webhook', methods=['POST'])
 def receive_message():
     """
-    Rota que recebe as mensagens dos pacientes.
+    Rota que recebe as mensagens do WhatsApp.
     """
     body = request.get_json()
 
     try:
-        # Verifica se o formato de dados é do WhatsApp (evita erros com mensagens de sistema)
-        if body.get("object") == "whatsapp_business_account":
+        if body and body.get("object") == "whatsapp_business_account":
             entry = body.get("entry", [])[0]
             changes = entry.get("changes", [])[0]
             value = changes.get("value", {})
             messages = value.get("messages", [])
 
-            # Se realmente houver uma mensagem nova...
             if messages:
                 message = messages[0]
-                sender_phone = message.get("from") # Número do paciente
+                sender_phone = message.get("from")
                 
-                # Só processamos mensagens de texto neste momento
                 if message.get("type") == "text":
                     message_text = message.get("text", {}).get("body")
-                    print(f"Nova mensagem de {sender_phone}: {message_text}")
+                    print(f"[WHATSAPP] Mensagem de {sender_phone}: {message_text}")
                     
-                    # 1. Pede para a IA pensar na resposta
                     resposta_ia = get_gemini_response(sender_phone, message_text)
-                    
-                    # 2. Envia a resposta de volta pelo WhatsApp
                     send_whatsapp_message(sender_phone, resposta_ia)
                     
     except Exception as e:
-        print(f"Erro ao processar mensagem: {e}")
+        print(f"[ERRO POST]: {e}")
 
-    # A Meta exige que a gente sempre responda "200 OK" rápido, senão ela fica tentando reenviar a mensagem.
     return jsonify({"status": "ok"}), 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
